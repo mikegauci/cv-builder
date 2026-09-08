@@ -12,6 +12,8 @@ export const metadata: Metadata = {
   description: "Create, manage and export multiple CVs.",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{
