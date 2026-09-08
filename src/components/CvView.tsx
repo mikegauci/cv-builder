@@ -172,7 +172,7 @@ export default function CvView({ data, showDownload = true }: { data: CvWithEntr
           )}
         </header>
 
-        <main className="space-y-7">
+        <div className="space-y-7">
           {sectionOrder
             .filter((section) => grouped[section]?.length)
             .map((section, index) => (
@@ -249,7 +249,7 @@ export default function CvView({ data, showDownload = true }: { data: CvWithEntr
                 </div>
               </section>
             ))}
-        </main>
+        </div>
       </article>
     </div>
   );

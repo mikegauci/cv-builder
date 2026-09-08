@@ -1,6 +1,5 @@
 "use client";
 
-import { jsPDF } from "jspdf";
 import {
   buildCvPdfImportPayload,
   cvPdfCompactSections,
@@ -120,6 +119,7 @@ function parseRichTokens(line: string): RichToken[] {
 
 export default function DownloadCvButton({ data }: { data: CvWithEntries }) {
   async function handleDownload() {
+    const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     const sections = splitBySection(data.entries);
     const location = [data.cv.city, data.cv.country].filter(Boolean).join(", ");

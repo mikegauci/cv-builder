@@ -68,19 +68,19 @@ export default function FormattedText({ text, className }: Props) {
   const lines = text.split(/\r?\n/);
 
   return (
-    <p className={className}>
+    <div className={className}>
       {lines.map((line, idx) => {
         const isBullet = line.startsWith("- ");
         const content = isBullet ? line.slice(2) : line;
 
         return (
-          <span key={`line-${idx}`} className={isBullet ? "flex gap-1.5" : undefined}>
+          <div key={`line-${idx}`} className={isBullet ? "flex gap-1.5" : undefined}>
             {isBullet && <span className="shrink-0">•</span>}
             <span>{parseInline(content)}</span>
             {idx < lines.length - 1 && !isBullet && <br />}
-          </span>
+          </div>
         );
       })}
-    </p>
+    </div>
   );
 }
