@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import DownloadCvListButton from "@/components/DownloadCvListButton";
 import { ensureUniqueSlug } from "@/lib/cv-pdf";
 import { parseCvPdf } from "@/lib/cv-pdf-import";
 import { supabase } from "@/lib/supabase";
@@ -354,12 +355,14 @@ export default function CvListManager({ initialCvs }: Props) {
           {cvs.length === 0 && <p className="px-6 py-6 text-sm text-gray-500">No CVs yet.</p>}
           {cvs.map((cv) => (
             <div key={cv.id} className="px-6 py-4 flex items-center gap-3">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-[#1a2744]">{cv.title}</p>
                 <p className="text-xs text-gray-500">{cv.target_role}</p>
               </div>
 
-              <div className="ml-auto flex items-center gap-2">
+              <DownloadCvListButton cv={cv} />
+
+              <div className="flex items-center gap-2 shrink-0">
                 <a
                   href={cv.is_public ? `/cv/${cv.slug}` : `/admin/cvs/${cv.id}/preview`}
                   target="_blank"

@@ -39,7 +39,7 @@ export interface GenerateCoverLetterInput {
 }
 
 export function buildCoverLetterSlugBase(roleTitle: string, companyName: string): string {
-  return `${companyName.trim()} ${roleTitle.trim()}`;
+  return `${companyName.trim()} ${roleTitle.trim()} cover letter`;
 }
 
 export async function generateCoverLetter(

@@ -35,3 +35,10 @@ export function splitCoverLetterParagraphs(body: string): string[] {
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 }
+
+export function buildCoverLetterPdfFilename(coverLetter: CoverLetter, cv: Cv | null): string {
+  const namePart = (cv?.full_name.trim() || "cover-letter").replace(/\s+/g, "-");
+  const slug = coverLetter.slug.trim() || "cover-letter";
+  const slugPart = slug.endsWith("-cover-letter") ? slug : `${slug}-cover-letter`;
+  return `${namePart}-${slugPart}.pdf`;
+}

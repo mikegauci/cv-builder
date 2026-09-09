@@ -92,8 +92,18 @@ export function buildCvPdfImportPayload(data: CvWithEntries): CvPdfImportPayload
   };
 }
 
+export function buildCvPdfFilename(fullName: string, slug: string): string {
+  const namePart = fullName.trim().replace(/\s+/g, "-") || "cv";
+  const normalizedSlug = slug.trim() || "cv";
+  const slugPart = normalizedSlug.endsWith("-resume") ? normalizedSlug : `${normalizedSlug}-resume`;
+  return `${namePart}-${slugPart}.pdf`;
+}
+
 export function deriveSlugFromFilename(filename: string): string | null {
-  const baseName = filename.replace(/\.pdf$/i, "").trim();
+  let baseName = filename.replace(/\.pdf$/i, "").trim();
+  if (baseName.endsWith("-resume")) {
+    baseName = baseName.slice(0, -"-resume".length);
+  }
   const lastDash = baseName.lastIndexOf("-");
   if (lastDash === -1) {
     return null;

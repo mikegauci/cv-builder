@@ -1,6 +1,9 @@
 "use client";
 
-import { buildCoverLetterPlainText } from "@/lib/cover-letter-plain-text";
+import {
+  buildCoverLetterPdfFilename,
+  buildCoverLetterPlainText,
+} from "@/lib/cover-letter-plain-text";
 import type { CoverLetter, Cv } from "@/lib/types";
 
 export default function DownloadCoverLetterButton({
@@ -43,9 +46,7 @@ export default function DownloadCoverLetterButton({
       y += 8;
     }
 
-    const slugPart = coverLetter.slug.trim() || "cover-letter";
-    const namePart = cv?.full_name.trim().replace(/\s+/g, "-") ?? "cover-letter";
-    pdf.save(`${namePart}-${slugPart}.pdf`);
+    pdf.save(buildCoverLetterPdfFilename(coverLetter, cv));
   }
 
   return (
