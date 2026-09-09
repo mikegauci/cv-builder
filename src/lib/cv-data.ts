@@ -29,6 +29,42 @@ export async function getAllCvs(): Promise<Cv[]> {
   return data as Cv[];
 }
 
+export async function getAllCvsWithEntries(): Promise<CvWithEntries[]> {
+  const client = createSupabaseServerClient();
+  if (!client) return [];
+
+  const { data: cvs, error: cvError } = await client.from("cvs").select("*").order("updated_at", { ascending: false });
+
+  if (cvError || !cvs || cvs.length === 0) {
+    return [];
+  }
+
+  const { data: entries, error: entriesError } = await client
+    .from("cv_entries")
+    .select("*")
+    .in(
+      "cv_id",
+      cvs.map((cv) => cv.id)
+    )
+    .order("item_order");
+
+  if (entriesError || !entries) {
+    return (cvs as Cv[]).map((cv) => ({ cv, entries: [] }));
+  }
+
+  const entriesByCvId = new Map<number, CvEntry[]>();
+  for (const entry of entries as CvEntry[]) {
+    const list = entriesByCvId.get(entry.cv_id) ?? [];
+    list.push(entry);
+    entriesByCvId.set(entry.cv_id, list);
+  }
+
+  return (cvs as Cv[]).map((cv) => ({
+    cv,
+    entries: entriesByCvId.get(cv.id) ?? [],
+  }));
+}
+
 export async function getCvById(cvId: number): Promise<CvWithEntries | null> {
   const client = createSupabaseServerClient();
   if (!client) return null;

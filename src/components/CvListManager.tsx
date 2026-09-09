@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ensureUniqueSlug } from "@/lib/cv-pdf";
 import { parseCvPdf } from "@/lib/cv-pdf-import";
+import { DEFAULT_TIMELINE_NOTES } from "@/lib/generate-cv-defaults";
 import { supabase } from "@/lib/supabase";
 import type { Cv } from "@/lib/types";
 
@@ -20,7 +21,12 @@ export default function CvListManager({ initialCvs }: Props) {
   const [targetRole, setTargetRole] = useState("");
   const [message, setMessage] = useState("");
   const [importMessage, setImportMessage] = useState("");
+  const [generateMessage, setGenerateMessage] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [timelineNotes, setTimelineNotes] = useState(DEFAULT_TIMELINE_NOTES);
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -124,6 +130,51 @@ export default function CvListManager({ initialCvs }: Props) {
     setCvs((prev) => [newCv as Cv, ...prev]);
     setLoading(false);
     router.push(`/admin/cvs/${newCv.id}`);
+  }
+
+  async function generateCvFromJob(e: React.FormEvent) {
+    e.preventDefault();
+    setGenerateMessage("");
+    setMessage("");
+    setImportMessage("");
+
+    if (!jobDescription.trim()) {
+      setGenerateMessage("Paste a job description first.");
+      return;
+    }
+
+    setGenerating(true);
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/admin/generate-cv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobDescription: jobDescription.trim(),
+          companyName: companyName.trim(),
+          timelineNotes: timelineNotes.trim(),
+        }),
+      });
+
+      const payload = (await response.json()) as { id?: number; error?: string };
+      if (!response.ok || !payload.id) {
+        setGenerateMessage(payload.error ?? "Could not generate CV.");
+        setGenerating(false);
+        setLoading(false);
+        return;
+      }
+
+      setJobDescription("");
+      setCompanyName("");
+      setTimelineNotes(DEFAULT_TIMELINE_NOTES);
+      router.push(`/admin/cvs/${payload.id}`);
+      router.refresh();
+    } catch (error) {
+      setGenerateMessage(error instanceof Error ? error.message : "Could not generate CV.");
+      setGenerating(false);
+      setLoading(false);
+    }
   }
 
   async function deleteCv(cvId: number) {
@@ -233,9 +284,46 @@ export default function CvListManager({ initialCvs }: Props) {
           disabled={loading}
           className="bg-[#1a2744] text-white px-5 py-2 text-sm hover:bg-[#243256] disabled:opacity-50"
         >
-          {loading ? "Creating..." : "Create CV"}
+          {loading && !generating ? "Creating..." : "Create CV"}
         </button>
         {message && <p className="text-xs text-red-500">{message}</p>}
+      </form>
+
+      <form onSubmit={generateCvFromJob} className="bg-white border border-gray-200 p-6 space-y-4">
+        <h2 className="text-sm font-semibold text-[#1a2744]">Generate from job description</h2>
+        <p className="text-xs text-gray-500">
+          Paste a job posting. OpenAI will read all of your existing CVs and create a new unpublished
+          draft tailored to that role. Review dates and wording in the editor before publishing.
+        </p>
+        <textarea
+          value={jobDescription}
+          onChange={(e) => setJobDescription(e.target.value)}
+          className="w-full border border-gray-300 px-3 py-2 text-sm min-h-40"
+          placeholder="Paste the full job description"
+          required
+        />
+        <input
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          className="w-full border border-gray-300 px-3 py-2 text-sm"
+          placeholder="Company name (optional)"
+        />
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Timeline notes</label>
+          <textarea
+            value={timelineNotes}
+            onChange={(e) => setTimelineNotes(e.target.value)}
+            className="w-full border border-gray-300 px-3 py-2 text-sm min-h-24"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-[#1a2744] text-white px-5 py-2 text-sm hover:bg-[#243256] disabled:opacity-50"
+        >
+          {generating ? "Generating... this can take a minute" : "Generate tailored CV"}
+        </button>
+        {generateMessage && <p className="text-xs text-red-500">{generateMessage}</p>}
       </form>
 
       <section className="bg-white border border-gray-200 p-6 space-y-4">
@@ -264,7 +352,7 @@ export default function CvListManager({ initialCvs }: Props) {
           onClick={() => importInputRef.current?.click()}
           className="border border-[#1a2744] text-[#1a2744] px-5 py-2 text-sm hover:bg-[#1a2744]/5 disabled:opacity-50"
         >
-          {loading ? "Importing..." : "Choose PDF"}
+          {loading && !generating ? "Importing..." : "Choose PDF"}
         </button>
         {importMessage && <p className="text-xs text-red-500">{importMessage}</p>}
       </section>

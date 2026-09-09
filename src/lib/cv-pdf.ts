@@ -103,15 +103,19 @@ export function deriveSlugFromFilename(filename: string): string | null {
   return /^[a-z0-9-]+$/.test(slug) ? slug : null;
 }
 
-export function ensureUniqueSlug(baseSlug: string, existingSlugs: string[]): string {
+export function ensureUniqueSlug(
+  baseSlug: string,
+  existingSlugs: string[],
+  collisionSuffix = "imported"
+): string {
   if (!existingSlugs.includes(baseSlug)) {
     return baseSlug;
   }
 
-  let candidate = `${baseSlug}-imported`;
+  let candidate = `${baseSlug}-${collisionSuffix}`;
   let counter = 2;
   while (existingSlugs.includes(candidate)) {
-    candidate = `${baseSlug}-imported-${counter}`;
+    candidate = `${baseSlug}-${collisionSuffix}-${counter}`;
     counter += 1;
   }
   return candidate;

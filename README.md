@@ -21,6 +21,7 @@ Add:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `ADMIN_PASSWORD`
+- `OPENAI_API_KEY` (required to generate a tailored CV from a job description)
 
 ## 2) Supabase tables
 
@@ -43,5 +44,5 @@ Open [http://localhost:3000](http://localhost:3000).
 - `/cv/[slug]` public CV page + PDF download
 - `/admin/login` admin login
 - `/admin` admin dashboard
-- `/admin/cvs` CV list + create
+- `/admin/cvs` CV list + create, PDF import, and generate from a job description
 - `/admin/cvs/[id]` CV editor
