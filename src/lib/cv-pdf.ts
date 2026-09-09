@@ -106,19 +106,27 @@ export function deriveSlugFromFilename(filename: string): string | null {
 export function ensureUniqueSlug(
   baseSlug: string,
   existingSlugs: string[],
-  collisionSuffix = "imported"
+  collisionSuffix?: string
 ): string {
   if (!existingSlugs.includes(baseSlug)) {
     return baseSlug;
   }
 
-  let candidate = `${baseSlug}-${collisionSuffix}`;
+  if (collisionSuffix) {
+    let candidate = `${baseSlug}-${collisionSuffix}`;
+    let counter = 2;
+    while (existingSlugs.includes(candidate)) {
+      candidate = `${baseSlug}-${collisionSuffix}-${counter}`;
+      counter += 1;
+    }
+    return candidate;
+  }
+
   let counter = 2;
-  while (existingSlugs.includes(candidate)) {
-    candidate = `${baseSlug}-${collisionSuffix}-${counter}`;
+  while (existingSlugs.includes(`${baseSlug}-${counter}`)) {
     counter += 1;
   }
-  return candidate;
+  return `${baseSlug}-${counter}`;
 }
 
 function base64UrlEncode(value: string): string {

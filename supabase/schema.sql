@@ -14,6 +14,10 @@ create table if not exists public.cvs (
   github text,
   website text,
   is_public boolean not null default false,
+  company_name text,
+  job_description text,
+  jd_analysis jsonb,
+  jd_coverage jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -29,6 +33,18 @@ create table if not exists public.cv_entries (
   subtitle text,
   date_label text,
   description text
+);
+
+create table if not exists public.skill_pool (
+  id bigint generated always as identity primary key,
+  category text not null,
+  name text not null,
+  proficiency text not null default 'proficient'
+    check (proficiency in ('expert', 'proficient', 'familiar')),
+  context text,
+  item_order int not null default 1,
+  created_at timestamptz not null default now(),
+  unique (category, name)
 );
 
 create table if not exists public.cover_letters (

@@ -1,0 +1,11 @@
+---
+description: Core project conventions for cv-builder
+alwaysApply: true
+---
+
+# cv-builder conventions
+
+- Do not add test files (`*.test.ts`, `*.spec.ts`, `__tests__/`, etc.) unless the user explicitly asks for tests.
+- Do not add code comments unless the user explicitly asks for comments or the logic is genuinely non-obvious and cannot be made clear through naming alone.
+- When generating CVs, send all existing CV versions to the model so it can pick the best phrasing and facts across them.
+- Generated CV slugs must not use a `-tailored` suffix; use numeric suffixes only for collisions (`-2`, `-3`, …).

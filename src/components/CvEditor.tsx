@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import type { Cv, CvEntry, CvSectionType, CvWithEntries } from "@/lib/types";
+import type { Cv, CvEntry, CvSectionType, CvWithEntries, JdCoverageItem } from "@/lib/types";
 import { Input, RichTextarea } from "@/components/EditorFields";
 
 type EditableEntry = Omit<CvEntry, "id"> & { id: number | null };
+
+const slugPattern = /^[a-z0-9-]+$/;
 
 const sections: CvSectionType[] = ["experience", "education", "languages", "skills", "courses"];
 const compactSections: CvSectionType[] = ["languages", "skills"];
@@ -30,6 +32,7 @@ export default function CvEditor({
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [coverageOpen, setCoverageOpen] = useState(true);
   const router = useRouter();
 
   const sortedEntryRefs = useMemo(
@@ -104,6 +107,12 @@ export default function CvEditor({
     setSaving(true);
     setMessage("");
 
+    if (!slugPattern.test(cv.slug)) {
+      setSaving(false);
+      setMessage("Slug can only contain lowercase letters, numbers and dashes.");
+      return;
+    }
+
     const { data: updatedCv, error: cvError } = await supabase
       .from("cvs")
       .update({
@@ -175,6 +184,8 @@ export default function CvEditor({
   const previewHref = savedIsPublic ? `/cv/${cv.slug}` : `/admin/cvs/${cv.id}/preview`;
   const previewLabel = savedIsPublic ? "View public page" : "Preview draft";
   const visibilityPending = cv.is_public && !savedIsPublic;
+  const coverage = (cv.jd_coverage ?? []) as JdCoverageItem[];
+  const hasCoverage = coverage.length > 0;
 
   return (
     <div className="space-y-8">
@@ -203,7 +214,10 @@ export default function CvEditor({
         <h2 className="text-sm font-semibold text-[#1a2744]">CV Details</h2>
         <div className="grid md:grid-cols-3 gap-3">
           <Input label="Title" value={cv.title} onChange={(v) => setCv((prev) => ({ ...prev, title: v }))} />
-          <Input label="Slug" value={cv.slug} onChange={(v) => setCv((prev) => ({ ...prev, slug: v }))} />
+          <div>
+            <Input label="Slug" value={cv.slug} onChange={(v) => setCv((prev) => ({ ...prev, slug: v }))} />
+            <p className="text-xs text-gray-500 mt-1">Public URL: /cv/{cv.slug || "your-slug"}</p>
+          </div>
           <Input
             label="Target role"
             value={cv.target_role}
@@ -284,6 +298,46 @@ export default function CvEditor({
           Publicly visible
         </label>
       </section>
+
+      {hasCoverage && (
+        <section className="bg-white border border-gray-200 p-6 space-y-4">
+          <button
+            type="button"
+            onClick={() => setCoverageOpen((open) => !open)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <h2 className="text-sm font-semibold text-[#1a2744]">JD Match</h2>
+            <span className="text-xs text-gray-500">{coverageOpen ? "Hide" : "Show"}</span>
+          </button>
+          {coverageOpen && (
+            <div className="space-y-3">
+              {cv.company_name && (
+                <p className="text-xs text-gray-500">
+                  Tailored for <span className="font-medium text-[#1a2744]">{cv.company_name}</span>
+                </p>
+              )}
+              {coverage.map((item, index) => (
+                <div key={`${item.requirement}-${index}`} className="border border-gray-100 p-3 space-y-1">
+                  <div className="flex items-start gap-2">
+                    <span
+                      className={`text-[10px] uppercase tracking-wide px-2 py-0.5 shrink-0 ${coverageStatusClass(item.status)}`}
+                    >
+                      {item.status}
+                    </span>
+                    <p className="text-sm text-[#1a2744]">{item.requirement}</p>
+                  </div>
+                  <p className="text-xs text-gray-500">{item.evidence}</p>
+                  {item.status === "missing" && (
+                    <p className="text-xs text-amber-700">
+                      Consider adding this to your skills pool or experience before publishing.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {sections.map((section) => {
         const sectionEntries = sortedEntryRefs.filter((x) => x.entry.section === section);
@@ -404,5 +458,18 @@ export default function CvEditor({
       </div>
     </div>
   );
+}
+
+function coverageStatusClass(status: JdCoverageItem["status"]): string {
+  switch (status) {
+    case "strong":
+      return "bg-green-100 text-green-800";
+    case "partial":
+      return "bg-amber-100 text-amber-800";
+    case "missing":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
 }
 

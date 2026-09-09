@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ensureUniqueSlug } from "@/lib/cv-pdf";
 import { parseCvPdf } from "@/lib/cv-pdf-import";
-import { DEFAULT_TIMELINE_NOTES } from "@/lib/generate-cv-defaults";
 import { supabase } from "@/lib/supabase";
 import type { Cv } from "@/lib/types";
 
@@ -24,7 +23,6 @@ export default function CvListManager({ initialCvs }: Props) {
   const [generateMessage, setGenerateMessage] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [timelineNotes, setTimelineNotes] = useState(DEFAULT_TIMELINE_NOTES);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -153,7 +151,6 @@ export default function CvListManager({ initialCvs }: Props) {
         body: JSON.stringify({
           jobDescription: jobDescription.trim(),
           companyName: companyName.trim(),
-          timelineNotes: timelineNotes.trim(),
         }),
       });
 
@@ -167,7 +164,6 @@ export default function CvListManager({ initialCvs }: Props) {
 
       setJobDescription("");
       setCompanyName("");
-      setTimelineNotes(DEFAULT_TIMELINE_NOTES);
       router.push(`/admin/cvs/${payload.id}`);
       router.refresh();
     } catch (error) {
@@ -198,7 +194,7 @@ export default function CvListManager({ initialCvs }: Props) {
     try {
       const parsed = await parseCvPdf(file);
       const existingSlugs = cvs.map((cv) => cv.slug);
-      const uniqueSlug = ensureUniqueSlug(parsed.cv.slug, existingSlugs);
+      const uniqueSlug = ensureUniqueSlug(parsed.cv.slug, existingSlugs, "imported");
 
       const { data: newCv, error: cvError } = await supabase
         .from("cvs")
@@ -292,8 +288,9 @@ export default function CvListManager({ initialCvs }: Props) {
       <form onSubmit={generateCvFromJob} className="bg-white border border-gray-200 p-6 space-y-4">
         <h2 className="text-sm font-semibold text-[#1a2744]">Generate from job description</h2>
         <p className="text-xs text-gray-500">
-          Paste a job posting. OpenAI will read all of your existing CVs and create a new unpublished
-          draft tailored to that role. Review dates and wording in the editor before publishing.
+          Paste a job posting. OpenAI analyses the JD, then tailors a new unpublished draft from your
+          existing CVs and skills pool. Seed your pool at /admin/skills first for best results. Review
+          the JD Match panel, dates, and wording in the editor before publishing.
         </p>
         <textarea
           value={jobDescription}
@@ -308,14 +305,6 @@ export default function CvListManager({ initialCvs }: Props) {
           className="w-full border border-gray-300 px-3 py-2 text-sm"
           placeholder="Company name (optional)"
         />
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Timeline notes</label>
-          <textarea
-            value={timelineNotes}
-            onChange={(e) => setTimelineNotes(e.target.value)}
-            className="w-full border border-gray-300 px-3 py-2 text-sm min-h-24"
-          />
-        </div>
         <button
           type="submit"
           disabled={loading}

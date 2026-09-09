@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAllCvsWithEntries } from "@/lib/cv-data";
 import {
   buildGeneratedEntries,
+  buildGeneratedSlugBase,
+  buildGeneratedTitle,
   generateTailoredCv,
   normalizeGeneratedSlug,
 } from "@/lib/generate-cv";
+import { analyseJobDescription, resolveCompanyName } from "@/lib/jd-analysis";
+import { resolveCvIdentity } from "@/lib/cv-identity";
 import { ensureUniqueSlug } from "@/lib/cv-pdf";
+import { getSkillPool } from "@/lib/skill-pool-data";
 import { createSupabaseServerClient } from "@/lib/supabase";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
+
+const MAX_JOB_DESCRIPTION_LENGTH = 30_000;
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get("admin_token")?.value;
@@ -29,11 +36,23 @@ export async function POST(request: NextRequest) {
 
   const jobDescription = readString(body, "jobDescription");
   const companyName = readString(body, "companyName");
-  const timelineNotes = readString(body, "timelineNotes");
 
   if (!jobDescription) {
     return NextResponse.json({ error: "Job description is required." }, { status: 400 });
   }
+
+  if (jobDescription.length > MAX_JOB_DESCRIPTION_LENGTH) {
+    return NextResponse.json(
+      { error: `Job description must be ${MAX_JOB_DESCRIPTION_LENGTH} characters or fewer.` },
+      { status: 400 }
+    );
+  }
+
+  const requestStartedAt = Date.now();
+  console.log("[generate-cv] Request started", {
+    jdLength: jobDescription.length,
+    companyName: companyName || null,
+  });
 
   const sourceCvs = await getAllCvsWithEntries();
   if (sourceCvs.length === 0) {
@@ -43,16 +62,39 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let jdAnalysis;
+  try {
+    jdAnalysis = await analyseJobDescription({
+      jobDescription,
+      companyName,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not analyse job description.";
+    console.error("[generate-cv] Stage 1 failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+
+  const resolvedCompanyName = resolveCompanyName(companyName, jdAnalysis);
+  const skillPool = await getSkillPool();
+  console.log("[generate-cv] Loaded inputs", {
+    sourceCvCount: sourceCvs.length,
+    sourceCvTitles: sourceCvs.map((source) => source.cv.title),
+    skillPoolCount: skillPool.length,
+    resolvedCompanyName,
+  });
+
   let generated;
   try {
     generated = await generateTailoredCv({
       jobDescription,
-      companyName,
-      timelineNotes,
+      companyName: resolvedCompanyName ?? "",
       sourceCvs,
+      jdAnalysis,
+      skillPool,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not generate CV.";
+    console.error("[generate-cv] Stage 2 failed", { error: message });
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
@@ -61,22 +103,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
   }
 
-  const identity = sourceCvs[0].cv;
+  const identity = resolveCvIdentity(sourceCvs);
+  const targetRole = generated.target_role.trim();
+  const title = buildGeneratedTitle(targetRole, resolvedCompanyName);
+  const slugBase = buildGeneratedSlugBase(targetRole, resolvedCompanyName, generated.slug);
   const uniqueSlug = ensureUniqueSlug(
-    normalizeGeneratedSlug(generated.slug || generated.target_role || generated.title),
-    sourceCvs.map((source) => source.cv.slug),
-    "tailored"
+    normalizeGeneratedSlug(slugBase),
+    sourceCvs.map((source) => source.cv.slug)
   );
-  const title = companyName
-    ? `${companyName} – ${generated.target_role.trim()}`
-    : generated.title.trim() || generated.target_role.trim();
 
   const { data: newCv, error: cvError } = await client
     .from("cvs")
     .insert({
       title,
       slug: uniqueSlug,
-      target_role: generated.target_role.trim(),
+      target_role: targetRole,
       summary: generated.summary.trim(),
       full_name: identity.full_name,
       profile_image_url: identity.profile_image_url,
@@ -88,11 +129,16 @@ export async function POST(request: NextRequest) {
       github: identity.github,
       website: identity.website,
       is_public: false,
+      company_name: resolvedCompanyName,
+      job_description: jobDescription,
+      jd_analysis: jdAnalysis,
+      jd_coverage: generated.coverage,
     })
     .select("*")
     .single();
 
   if (cvError || !newCv) {
+    console.error("[generate-cv] Failed to save CV", { error: cvError?.message });
     return NextResponse.json({ error: cvError?.message ?? "Could not save generated CV." }, { status: 500 });
   }
 
@@ -105,9 +151,25 @@ export async function POST(request: NextRequest) {
     const { error: entriesError } = await client.from("cv_entries").insert(entries);
     if (entriesError) {
       await client.from("cvs").delete().eq("id", newCv.id);
+      console.error("[generate-cv] Failed to save entries, rolled back CV", {
+        cvId: newCv.id,
+        error: entriesError.message,
+      });
       return NextResponse.json({ error: entriesError.message }, { status: 500 });
     }
   }
+
+  console.log("[generate-cv] Request complete", {
+    durationMs: Date.now() - requestStartedAt,
+    cvId: newCv.id,
+    title,
+    slug: uniqueSlug,
+    entryCount: entries.length,
+    coverage: generated.coverage.map((item) => ({
+      requirement: item.requirement,
+      status: item.status,
+    })),
+  });
 
   return NextResponse.json({ id: newCv.id });
 }
