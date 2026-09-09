@@ -48,6 +48,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Generated CVs store the company name, job description, JD analysis, and coverage report for later review.
 
+On a CV that has a stored job description, the editor shows **Generate cover letter**. It writes a tailored ~300–350 word letter body from the saved JD analysis and CV bullets, creates an unpublished cover letter linked to that CV, and opens the letter editor. The public letter page adds the greeting and sign-off automatically, so only the body is generated. Save CV edits before generating — the route reads from the database, not unsaved editor state.
+
 Slug collisions use numeric suffixes only (`-2`, `-3`), never `-tailored`.
 
 On Vercel Hobby, function timeout is 60s — generation may fail if both OpenAI calls exceed that. Use Pro or set `maxDuration` lower with a single-stage fallback.

@@ -33,6 +33,7 @@ export default function CvEditor({
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [coverageOpen, setCoverageOpen] = useState(true);
+  const [generatingLetter, setGeneratingLetter] = useState(false);
   const router = useRouter();
 
   const sortedEntryRefs = useMemo(
@@ -101,6 +102,32 @@ export default function CvEditor({
     setCv((prev) => ({ ...prev, profile_image_url: data.publicUrl }));
     setUploadingImage(false);
     setMessage("Image uploaded. Save CV to persist it.");
+  }
+
+  async function generateCoverLetter() {
+    setGeneratingLetter(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/generate-cover-letter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cvId: cv.id }),
+      });
+
+      const data = (await response.json()) as { id?: number; error?: string };
+
+      if (!response.ok || !data.id) {
+        setMessage(data.error ?? "Could not generate cover letter.");
+        return;
+      }
+
+      router.push(`/admin/cover-letters/${data.id}`);
+    } catch {
+      setMessage("Could not generate cover letter.");
+    } finally {
+      setGeneratingLetter(false);
+    }
   }
 
   async function saveAll() {
@@ -186,6 +213,7 @@ export default function CvEditor({
   const visibilityPending = cv.is_public && !savedIsPublic;
   const coverage = (cv.jd_coverage ?? []) as JdCoverageItem[];
   const hasCoverage = coverage.length > 0;
+  const hasJobDescription = Boolean(cv.job_description?.trim());
 
   return (
     <div className="space-y-8">
@@ -198,11 +226,26 @@ export default function CvEditor({
         >
           {previewLabel}
         </a>
+        {hasJobDescription && (
+          <button
+            type="button"
+            onClick={() => void generateCoverLetter()}
+            disabled={generatingLetter}
+            className="text-sm bg-[#1a2744] text-white px-3 py-1.5 hover:bg-[#243256] disabled:opacity-50"
+          >
+            {generatingLetter ? "Generating cover letter..." : "Generate cover letter"}
+          </button>
+        )}
         {savedIsPublic && <p className="text-xs text-green-700">This CV is publicly visible.</p>}
         {visibilityPending && (
           <p className="text-xs text-amber-700">Public visibility is checked but not saved yet.</p>
         )}
       </div>
+      {hasJobDescription && (
+        <p className="text-xs text-gray-500 -mt-4">
+          Cover letter generation uses the saved version of this CV. Save any edits before generating.
+        </p>
+      )}
       {importSource && (
         <div className="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 text-sm">
           Imported via {importSource === "metadata" ? "embedded PDF metadata" : "layout parsing"}.
