@@ -1,5 +1,18 @@
 import OpenAI from "openai";
 import { getOpenAiModel, getOpenAiTemperature } from "@/lib/openai-model";
+import {
+  buildCanonicalTimeline,
+  buildSystemPrompt,
+  normalizeBullet,
+  normalizeEmployer,
+  parseExperienceBullets,
+  rankBullets,
+  resolveExperienceCluster,
+  resolveRoleTrack,
+  selectExperienceTimeline,
+  toGeneratedExperience,
+  type CanonicalRole,
+} from "@/lib/role-track";
 import type {
   CvEntry,
   CvSectionType,
@@ -12,27 +25,6 @@ import type {
 const STABLE_SECTIONS: CvSectionType[] = ["education", "languages", "courses"];
 const COMPACT_SECTIONS: CvSectionType[] = ["languages", "skills"];
 const NO_DESCRIPTION_SECTIONS: CvSectionType[] = ["courses"];
-
-const SYSTEM_PROMPT = `You are an expert CV writer. You tailor one CV for a specific job using ONLY facts from the candidate's existing CVs and the provided skill pool.
-
-Rules:
-- Never invent employers, job titles they did not hold, degrees, projects, products, metrics, team sizes, or achievements that do not appear in the source CVs.
-- You MUST rewrite the summary and every experience bullet. Do not copy bullets verbatim from the source CVs.
-- The summary MUST be 3-5 sentences, open with the JD role title, and explicitly address the top three must_have_requirements using jd_summary as the brief.
-- Experience: 6-8 bullets per role (every role in the output). At least half of the bullets in recent roles (Winnables, Momentum, NetEnt) MUST map to a core_responsibility or must_have_requirement. Reframe real work in the JD's vocabulary and ATS keywords.
-- All existing CV versions are provided. Pick the strongest phrasing and facts across them, but the output experience timeline must match the Senior Full Stack Engineer CV only. Never omit pre-NetEnt roles: Web Project Manager (Kenmore Design), Frontend Developer (GIG), Junior Frontend Developer (ArenaCube). Include Motor Element if it appears in that timeline. Do NOT output roles outside that timeline (e.g. Tiugo/TinyMCE, Kindred, FDJ). Only omit Kindred/FDJ management roles (merged into Winnables per rules below).
-- Experience role selection (for frontend, full-stack, or engineering IC roles): NEVER output "Engineering Manager" or "Technical Product Owner" as separate experience entries. Those are management/product roles — do not substitute them for IC titles. Extract relevant leadership, delivery, mentoring, and technical-review bullets from those roles and merge them into "Senior Full Stack Developer (Front leaning)" at Winnables (up to 8 bullets total for that role).
-- Experience descriptions must use this markdown-ish format: each bullet on its own line starting with "- ", and **bold** for emphasis.
-- Skills: build 5-7 categories whose names mirror the JD stack headings (e.g. "Real-time Communication & Messaging", "Infrastructure & Orchestration"). Order categories by JD relevance. Fill each category ONLY from the skill pool and source CV skills. Never invent a skill that is not in the pool or source CVs. Omit JD tech_stack items with no pool match.
-- Skills: "title" is the category name; "description" is a comma-separated list (no bullets).
-- Dates: use date_label strings from source CVs. Do not invent employers or date ranges. Avoid overlapping full-time roles — contractor entries (subtitle contains "Contractor") may run alongside other work. Prefer: Winnables "August 2025 – August 2026", Momentum "September 2022 – May 2025", NetEnt "July 2019 – April 2022". Do not show Kindred/FDJ periods as separate entries for IC-tailored CVs.
-- coverage: for each of the top 8 must_have_requirements, report whether the tailored CV covers it as strong, partial, or missing, with brief evidence.
-- target_role should match the job posting title, or the closest honest fit from the candidate's experience.
-- title is an admin label for this tailored version (the target role, or "Company – Role" if a company is provided).
-
-Example of honest reframing (only if WebSockets appears in the pool or source CVs):
-Source bullet: "Built battles, pack opening, rewards, wallet flows"
-Rewritten: "Built **real-time, event-driven gameplay features** (battles, pack opening, rewards, wallet flows) integrated with backend services"`;
 
 const tailoredCvJsonSchema = {
   type: "object",
@@ -115,7 +107,8 @@ export interface GenerateTailoredCvInput {
   skillPool: SkillPoolItem[];
 }
 
-const EXCLUDED_IC_ROLE_TITLES = new Set(["engineering manager", "technical product owner"]);
+const MIN_EXPERIENCE_BULLETS = 6;
+const MAX_EXPERIENCE_BULLETS = 8;
 
 export async function generateTailoredCv(input: GenerateTailoredCvInput): Promise<GeneratedCvContent> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -125,6 +118,10 @@ export async function generateTailoredCv(input: GenerateTailoredCvInput): Promis
 
   const openai = new OpenAI({ apiKey });
   const model = getOpenAiModel();
+  const roleTrack = resolveRoleTrack(input.jdAnalysis);
+  const experienceCluster = resolveExperienceCluster(input.jdAnalysis);
+  const canonicalTimeline = buildCanonicalTimeline(input.sourceCvs);
+  const headlineTimeline = selectExperienceTimeline(canonicalTimeline, input.jdAnalysis);
 
   console.log("[generate-cv] Stage 2: tailoring CV", {
     model,
@@ -132,17 +129,23 @@ export async function generateTailoredCv(input: GenerateTailoredCvInput): Promis
     skillPoolCount: input.skillPool.length,
     companyName: input.companyName || null,
     targetRole: input.jdAnalysis.role_title,
+    roleTrack,
+    experienceCluster,
+    canonicalRoles: canonicalTimeline.length,
+    headlineRoles: headlineTimeline.length,
+    headlineEmployers: headlineTimeline.map((role) => role.subtitle ?? role.title),
   });
   const startedAt = Date.now();
 
   const temperature = getOpenAiTemperature(model, 0.6);
+  const systemPrompt = buildSystemPrompt(roleTrack, headlineTimeline, experienceCluster);
 
   const completion = await openai.chat.completions.create({
     model,
     ...(temperature !== undefined ? { temperature } : {}),
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(input) },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: buildUserPrompt(input, roleTrack, experienceCluster) },
     ],
     response_format: {
       type: "json_schema",
@@ -173,7 +176,11 @@ export async function generateTailoredCv(input: GenerateTailoredCvInput): Promis
   }
 
   const beforeSanitize = parsed.experience.length;
-  parsed.experience = sanitizeGeneratedExperience(parsed.experience, input.sourceCvs);
+  parsed.experience = sanitizeGeneratedExperience(
+    parsed.experience,
+    headlineTimeline,
+    input.jdAnalysis
+  );
   console.log("[generate-cv] Experience sanitized", {
     beforeRoles: beforeSanitize,
     afterRoles: parsed.experience.length,
@@ -289,7 +296,11 @@ export function normalizeGeneratedSlug(raw: string): string {
   return slug || "generated-cv";
 }
 
-function buildUserPrompt(input: GenerateTailoredCvInput): string {
+function buildUserPrompt(
+  input: GenerateTailoredCvInput,
+  roleTrack: string,
+  experienceCluster: string
+): string {
   const sourcePayload = input.sourceCvs.map((data) => ({
     title: data.cv.title,
     target_role: data.cv.target_role,
@@ -315,6 +326,9 @@ function buildUserPrompt(input: GenerateTailoredCvInput): string {
     : "No company name was provided in the form.";
 
   return [
+    `Detected role track: ${roleTrack}`,
+    `Detected experience cluster: ${experienceCluster}`,
+    "",
     "Structured JD analysis (use this as the tailoring brief):",
     JSON.stringify(input.jdAnalysis),
     "",
@@ -334,19 +348,17 @@ function buildUserPrompt(input: GenerateTailoredCvInput): string {
 function getPreferredSourceCv(sourceCvs: CvWithEntries[]): CvWithEntries {
   return (
     sourceCvs.find((source) => source.cv.slug === "senior-full-stack-engineer") ??
-    sourceCvs.reduce((best, current) => {
-      const bestCount = best.entries.filter((entry) => entry.section === "experience").length;
-      const currentCount = current.entries.filter((entry) => entry.section === "experience").length;
-      return currentCount > bestCount ? current : best;
-    }, sourceCvs[0])
+    [...sourceCvs].sort(
+      (a, b) => new Date(b.cv.updated_at).getTime() - new Date(a.cv.updated_at).getTime()
+    )[0]
   );
 }
 
 function firstSectionEntries(sourceCvs: CvWithEntries[], section: CvSectionType): CvEntry[] {
-  const preferredEntries = sourceCvs
-    .length > 0
-    ? getPreferredSourceCv(sourceCvs).entries.filter((entry) => entry.section === section)
-    : [];
+  const preferredEntries =
+    sourceCvs.length > 0
+      ? getPreferredSourceCv(sourceCvs).entries.filter((entry) => entry.section === section)
+      : [];
   if (preferredEntries.length > 0) {
     return preferredEntries;
   }
@@ -362,67 +374,32 @@ function firstSectionEntries(sourceCvs: CvWithEntries[], section: CvSectionType)
 
 function sanitizeGeneratedExperience(
   experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
+  headlineTimeline: CanonicalRole[],
+  jdAnalysis: JdAnalysis
 ): GeneratedExperienceEntry[] {
-  const generatedEm = experience.find(
-    (entry) => entry.title.trim().toLowerCase() === "engineering manager"
-  );
-  const emBullets =
-    parseExperienceBullets(generatedEm?.description ?? null) ||
-    getSourceRoleBullets(sourceCvs, "Engineering Manager");
+  const enforced = enforceHeadlineTimeline(experience, headlineTimeline);
+  return ensureMinimumExperienceBullets(enforced, headlineTimeline, jdAnalysis);
+}
 
-  const withoutExcludedTitles = experience.filter(
-    (entry) => !EXCLUDED_IC_ROLE_TITLES.has(entry.title.trim().toLowerCase())
-  );
-  const filtered = filterToCanonicalRolesOnly(withoutExcludedTitles, sourceCvs);
+function experienceEmployerKey(entry: GeneratedExperienceEntry): string {
+  return normalizeEmployer(entry.subtitle, entry.title);
+}
 
-  const winnablesIndex = filtered.findIndex((entry) =>
-    entry.title.toLowerCase().includes("senior full stack developer")
-  );
-
-  if (winnablesIndex !== -1) {
-    const existingBullets = parseExperienceBullets(filtered[winnablesIndex].description);
-    const seen = new Set(existingBullets.map(normalizeBullet));
-    const mergedBullets = [...existingBullets];
-
-    for (const bullet of emBullets) {
-      const key = normalizeBullet(bullet);
-      if (!seen.has(key)) {
-        mergedBullets.push(bullet);
-        seen.add(key);
-      }
-      if (mergedBullets.length >= 8) break;
-    }
-
-    filtered[winnablesIndex] = {
-      ...filtered[winnablesIndex],
-      description: mergedBullets.join("\n"),
-    };
+function enforceHeadlineTimeline(
+  experience: GeneratedExperienceEntry[],
+  headlineTimeline: CanonicalRole[]
+): GeneratedExperienceEntry[] {
+  const modelByEmployer = new Map<string, GeneratedExperienceEntry>();
+  for (const entry of experience) {
+    modelByEmployer.set(experienceEmployerKey(entry), entry);
   }
 
-  return finalizeExperience(filtered, sourceCvs);
-}
-
-function finalizeExperience(
-  experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
-): GeneratedExperienceEntry[] {
-  const withDates = applyPreferredDates(experience, sourceCvs);
-  const withBackfill = backfillMissingExperienceRoles(withDates, sourceCvs);
-  return ensureMinimumExperienceBullets(withBackfill, sourceCvs);
-}
-
-function experienceRoleKey(entry: GeneratedExperienceEntry): string {
-  return `${entry.title.trim().toLowerCase()}::${(entry.subtitle ?? "").trim().toLowerCase()}`;
-}
-
-function filterToCanonicalRolesOnly(
-  experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
-): GeneratedExperienceEntry[] {
-  const canonicalKeys = new Set(getCanonicalExperienceRoles(sourceCvs).map(experienceRoleKey));
-  const filtered = experience.filter((entry) => canonicalKeys.has(experienceRoleKey(entry)));
-  const removed = experience.filter((entry) => !canonicalKeys.has(experienceRoleKey(entry)));
+  const removed = experience.filter(
+    (entry) =>
+      !headlineTimeline.some(
+        (role) => experienceEmployerKey(toGeneratedExperience(role)) === experienceEmployerKey(entry)
+      )
+  );
 
   if (removed.length > 0) {
     console.log("[generate-cv] Removed non-canonical experience roles", {
@@ -434,40 +411,32 @@ function filterToCanonicalRolesOnly(
     });
   }
 
-  return filtered;
-}
-
-function getCanonicalExperienceRoles(sourceCvs: CvWithEntries[]): GeneratedExperienceEntry[] {
-  return getPreferredSourceCv(sourceCvs).entries
-    .filter((entry) => entry.section === "experience")
-    .filter((entry) => !EXCLUDED_IC_ROLE_TITLES.has(entry.title.trim().toLowerCase()))
-    .sort((a, b) => a.item_order - b.item_order)
-    .map((entry) => ({
-      title: entry.title.trim(),
-      subtitle: entry.subtitle?.trim() || null,
-      date_label: entry.date_label?.trim() || null,
-      description: entry.description?.trim() || null,
-    }));
-}
-
-function backfillMissingExperienceRoles(
-  experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
-): GeneratedExperienceEntry[] {
-  const canonical = getCanonicalExperienceRoles(sourceCvs);
-  const present = new Set(experience.map(experienceRoleKey));
   const backfilled: GeneratedExperienceEntry[] = [];
 
-  for (const role of canonical) {
-    const key = experienceRoleKey(role);
-    if (present.has(key)) continue;
+  const enforced = headlineTimeline.map((role) => {
+    const employerKey = experienceEmployerKey(toGeneratedExperience(role));
+    const modelEntry = modelByEmployer.get(employerKey);
 
-    backfilled.push({
-      ...role,
-      description: trimExperienceBullets(role.description, 8),
-    });
-    present.add(key);
-  }
+    if (!modelEntry) {
+      backfilled.push({
+        title: role.title,
+        subtitle: role.subtitle,
+        date_label: role.date_label,
+        description: null,
+      });
+      return {
+        ...toGeneratedExperience(role),
+        description: trimExperienceBullets(role.description, MAX_EXPERIENCE_BULLETS),
+      };
+    }
+
+    return {
+      title: role.title,
+      subtitle: role.subtitle,
+      date_label: role.date_label,
+      description: modelEntry.description,
+    };
+  });
 
   if (backfilled.length > 0) {
     console.log("[generate-cv] Backfilled missing experience roles", {
@@ -479,10 +448,7 @@ function backfillMissingExperienceRoles(
     });
   }
 
-  const order = new Map(canonical.map((role, index) => [experienceRoleKey(role), index]));
-  return [...experience, ...backfilled].sort(
-    (a, b) => (order.get(experienceRoleKey(a)) ?? 999) - (order.get(experienceRoleKey(b)) ?? 999)
-  );
+  return enforced;
 }
 
 function trimExperienceBullets(description: string | null, maxBullets: number): string | null {
@@ -491,19 +457,18 @@ function trimExperienceBullets(description: string | null, maxBullets: number): 
   return bullets.slice(0, maxBullets).join("\n");
 }
 
-const MIN_EXPERIENCE_BULLETS = 6;
-const MAX_EXPERIENCE_BULLETS = 8;
-
 function countExperienceBullets(description: string | null): number {
   return parseExperienceBullets(description).length;
 }
 
 function ensureMinimumExperienceBullets(
   experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
+  headlineTimeline: CanonicalRole[],
+  jdAnalysis: JdAnalysis
 ): GeneratedExperienceEntry[] {
-  const canonical = getCanonicalExperienceRoles(sourceCvs);
-  const canonicalByKey = new Map(canonical.map((role) => [experienceRoleKey(role), role]));
+  const canonicalByKey = new Map(
+    headlineTimeline.map((role) => [experienceEmployerKey(toGeneratedExperience(role)), role])
+  );
 
   return experience.map((entry) => {
     if (countExperienceBullets(entry.description) >= MIN_EXPERIENCE_BULLETS) {
@@ -513,14 +478,15 @@ function ensureMinimumExperienceBullets(
       };
     }
 
-    const source = canonicalByKey.get(experienceRoleKey(entry));
-    if (!source?.description) return entry;
+    const source = canonicalByKey.get(experienceEmployerKey(entry));
+    if (!source) return entry;
 
     const existing = parseExperienceBullets(entry.description);
     const seen = new Set(existing.map(normalizeBullet));
+    const rankedSourceBullets = rankBullets(source.bulletBank, jdAnalysis);
     const merged = [...existing];
 
-    for (const bullet of parseExperienceBullets(source.description)) {
+    for (const bullet of rankedSourceBullets) {
       const key = normalizeBullet(bullet);
       if (seen.has(key)) continue;
       merged.push(bullet);
@@ -533,92 +499,4 @@ function ensureMinimumExperienceBullets(
       description: trimExperienceBullets(merged.join("\n"), MAX_EXPERIENCE_BULLETS),
     };
   });
-}
-
-function parseExperienceBullets(description: string | null): string[] {
-  if (!description) return [];
-  return description
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- ") || line.startsWith("•"))
-    .map((line) => (line.startsWith("- ") ? line : `- ${line.replace(/^•\s*/, "")}`));
-}
-
-function normalizeBullet(bullet: string): string {
-  return bullet.replace(/\*\*/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function getSourceRoleBullets(sourceCvs: CvWithEntries[], roleTitle: string): string[] {
-  const target = roleTitle.toLowerCase();
-  for (const source of sourceCvs) {
-    const entry = source.entries.find(
-      (item) =>
-        item.section === "experience" && item.title.trim().toLowerCase() === target
-    );
-    if (entry?.description) {
-      return parseExperienceBullets(entry.description);
-    }
-  }
-  return [];
-}
-
-const PREFERRED_DATES: Array<{ match: (title: string, subtitle: string | null) => boolean; date: string }> = [
-  {
-    match: (title) => title.toLowerCase().includes("senior full stack developer"),
-    date: "August 2025 – August 2026",
-  },
-  {
-    match: (title, subtitle) =>
-      title.toLowerCase().includes("senior frontend engineer") &&
-      (subtitle?.toLowerCase().includes("momentum") ?? false),
-    date: "September 2022 – May 2025",
-  },
-  {
-    match: (title, subtitle) =>
-      (title.toLowerCase().includes("web developer") ||
-        title.toLowerCase().includes("wordpress developer")) &&
-      (subtitle?.toLowerCase().includes("netent") ?? false),
-    date: "July 2019 – April 2022",
-  },
-];
-
-function applyPreferredDates(
-  experience: GeneratedExperienceEntry[],
-  sourceCvs: CvWithEntries[]
-): GeneratedExperienceEntry[] {
-  return experience.map((entry) => {
-    const preferred = PREFERRED_DATES.find((rule) =>
-      rule.match(entry.title, entry.subtitle)
-    );
-    if (preferred) {
-      return { ...entry, date_label: preferred.date };
-    }
-
-    const sourceDate = findSourceDateLabel(sourceCvs, entry.title, entry.subtitle);
-    return sourceDate ? { ...entry, date_label: sourceDate } : entry;
-  });
-}
-
-function findSourceDateLabel(
-  sourceCvs: CvWithEntries[],
-  title: string,
-  subtitle: string | null
-): string | null {
-  const titleKey = title.trim().toLowerCase();
-  const subtitleKey = subtitle?.trim().toLowerCase() ?? "";
-
-  for (const source of sourceCvs) {
-    const entry = source.entries.find(
-      (item) =>
-        item.section === "experience" &&
-        item.title.trim().toLowerCase() === titleKey &&
-        (subtitleKey.length === 0 ||
-          item.subtitle?.trim().toLowerCase() === subtitleKey)
-    );
-    if (entry?.date_label) {
-      return entry.date_label.trim();
-    }
-  }
-
-  return null;
 }

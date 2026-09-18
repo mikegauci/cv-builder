@@ -1,9 +1,9 @@
 import OpenAI from "openai";
 import { getOpenAiModel, getOpenAiTemperature } from "@/lib/openai-model";
+import { coverLetterPersona, resolveRoleTrack } from "@/lib/role-track";
 import type { Cv, CvEntry, JdAnalysis, JdCoverageItem } from "@/lib/types";
 
-const SYSTEM_PROMPT = `You are an expert cover letter writer for senior software engineers.
-Write only the letter body — no salutation, sign-off, signature, subject line, address block, or date.
+const COVER_LETTER_RULES = `Write only the letter body — no salutation, sign-off, signature, subject line, address block, or date.
 The page renders "Dear {Company} Hiring Team," and the closing with contact details separately.
 
 Rules:
@@ -89,12 +89,15 @@ export async function generateCoverLetter(
   ].join("\n");
 
   const temperature = getOpenAiTemperature(model, 0.7);
+  const roleTrack = input.jdAnalysis ? resolveRoleTrack(input.jdAnalysis) : "engineering_ic";
+  const systemPrompt = `${coverLetterPersona(roleTrack)}
+${COVER_LETTER_RULES}`;
 
   const completion = await openai.chat.completions.create({
     model,
     ...(temperature !== undefined ? { temperature } : {}),
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
     response_format: {

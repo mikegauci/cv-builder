@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import type { Cv, CvEntry, CvSectionType, CvWithEntries, JdCoverageItem } from "@/lib/types";
+import {
+  experienceClusterLabel,
+  resolveExperienceCluster,
+  resolveRoleTrack,
+  roleTrackLabel,
+} from "@/lib/role-track";
+import type { Cv, CvEntry, CvSectionType, CvWithEntries, JdAnalysis, JdCoverageItem } from "@/lib/types";
 import { Input, RichTextarea } from "@/components/EditorFields";
 
 type EditableEntry = Omit<CvEntry, "id"> & { id: number | null };
@@ -214,6 +220,9 @@ export default function CvEditor({
   const coverage = (cv.jd_coverage ?? []) as JdCoverageItem[];
   const hasCoverage = coverage.length > 0;
   const hasJobDescription = Boolean(cv.job_description?.trim());
+  const jdAnalysis = cv.jd_analysis as JdAnalysis | null;
+  const detectedTrack = jdAnalysis ? roleTrackLabel(resolveRoleTrack(jdAnalysis)) : null;
+  const detectedCluster = jdAnalysis ? experienceClusterLabel(resolveExperienceCluster(jdAnalysis)) : null;
 
   return (
     <div className="space-y-8">
@@ -354,9 +363,26 @@ export default function CvEditor({
           </button>
           {coverageOpen && (
             <div className="space-y-3">
-              {cv.company_name && (
+              {(cv.company_name || detectedTrack || detectedCluster) && (
                 <p className="text-xs text-gray-500">
-                  Tailored for <span className="font-medium text-[#1a2744]">{cv.company_name}</span>
+                  {cv.company_name && (
+                    <>
+                      Tailored for <span className="font-medium text-[#1a2744]">{cv.company_name}</span>
+                    </>
+                  )}
+                  {cv.company_name && (detectedTrack || detectedCluster) && " · "}
+                  {detectedTrack && (
+                    <>
+                      Track: <span className="font-medium text-[#1a2744]">{detectedTrack}</span>
+                    </>
+                  )}
+                  {detectedTrack && detectedCluster && " · "}
+                  {detectedCluster && (
+                    <>
+                      Experience:{" "}
+                      <span className="font-medium text-[#1a2744]">{detectedCluster}</span>
+                    </>
+                  )}
                 </p>
               )}
               {coverage.map((item, index) => (

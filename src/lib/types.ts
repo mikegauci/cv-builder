@@ -17,6 +17,8 @@ export interface JdCoverageItem {
   evidence: string;
 }
 
+export type RoleTrack = "engineering_ic" | "product" | "engineering_management" | "other";
+
 export interface JdAnalysis {
   company_name: string | null;
   role_title: string;
@@ -28,6 +30,7 @@ export interface JdAnalysis {
   core_responsibilities: string[];
   tech_stack: string[];
   ats_keywords: string[];
+  role_track?: RoleTrack;
 }
 
 export interface Cv {

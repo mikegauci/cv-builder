@@ -6,7 +6,8 @@ const SYSTEM_PROMPT = `You are an expert recruiter and technical hiring analyst.
 Extract structured requirements from a job description.
 Be precise and concise. Use the employer's own wording where possible.
 If the company name is not explicit, return null for company_name.
-Do not invent requirements that are not supported by the posting.`;
+Do not invent requirements that are not supported by the posting.
+Set role_track from the primary function of the role, not the technologies mentioned — e.g. "Agentic AI Product Owner" is product even when the posting emphasises AI tooling.`;
 
 const jdAnalysisJsonSchema = {
   type: "object",
@@ -37,6 +38,10 @@ const jdAnalysisJsonSchema = {
       type: "array",
       items: { type: "string" },
     },
+    role_track: {
+      type: "string",
+      enum: ["engineering_ic", "product", "engineering_management", "other"],
+    },
   },
   required: [
     "company_name",
@@ -49,6 +54,7 @@ const jdAnalysisJsonSchema = {
     "core_responsibilities",
     "tech_stack",
     "ats_keywords",
+    "role_track",
   ],
 } as const;
 
@@ -123,6 +129,7 @@ export async function analyseJobDescription(
     durationMs: Date.now() - startedAt,
     company: parsed.company_name,
     role: parsed.role_title,
+    roleTrack: parsed.role_track,
     domain: parsed.domain,
     mustHaves: parsed.must_have_requirements.length,
     responsibilities: parsed.core_responsibilities.length,
