@@ -345,6 +345,14 @@ function averageBulletRelevance(bullets: string[], jdAnalysis: JdAnalysis): numb
   return bullets.reduce((sum, bullet) => sum + scoreBulletRelevance(bullet, jdAnalysis), 0) / bullets.length;
 }
 
+export const EXPERIENCE_BULLET_WRITING_RULES = [
+  "Experience bullets must read like a polished CV shown to a hiring manager — concise achievement statements only.",
+  "Never discuss coverage, gaps, missing skills, transferability, or how well the candidate matches the JD.",
+  "Forbidden in experience bullets: \"does not establish\", \"not established\", \"rather than\", \"without claiming\", \"transferable to\", \"relevant to the requirement\", quoting JD requirements, or comparing the role to the job posting.",
+  "Do not put candidate location (city/country/EU-based) inside experience bullets — location belongs in the CV header only.",
+  "Each bullet: one strong statement of what was owned, delivered, or achieved. Use **bold** for 1-3 key phrases. Max ~35 words per bullet.",
+].join("\n");
+
 export function buildSystemPrompt(
   track: RoleTrack,
   timeline: CanonicalRole[],
@@ -361,17 +369,23 @@ export function buildSystemPrompt(
     "You are an expert CV writer. You tailor one CV for a specific job using ONLY facts from the candidate's existing CVs and the provided skill pool.",
     "",
     "Rules:",
-    "- Never invent employers, job titles they did not hold, degrees, projects, products, metrics, team sizes, or achievements that do not appear in the source CVs.",
+    "- Never invent employers, job titles they did not hold, degrees, projects, metrics, team sizes, or achievements that do not appear in the source CVs.",
     "- You MUST rewrite the summary and every experience bullet. Do not copy bullets verbatim from the source CVs.",
     "- The summary MUST be 3-5 sentences, open with the JD role title, and explicitly address the top three must_have_requirements using jd_summary as the brief.",
+    "- Write the summary as a confident hiring-manager pitch. Never mention missing skills, gaps, or what the candidate has not done.",
     "- Experience: 6-8 bullets per role (every role in the output). Reframe real work in the JD's vocabulary and ATS keywords.",
+    "- Post-NetEnt roles (non-anchor employers in the timeline) are the primary JD keyword targets: every must_have_requirement and ats_keyword should appear in at least one post-NetEnt bullet.",
+    "- On post-NetEnt roles only, weave JD vocabulary (product vision, roadmap, use cases, concept through to production, business outcomes, governance, validation, security, Agentic AI, LLMs, RAG, prompt engineering, guardrails, evaluation) into descriptions of real work at that employer.",
+    "- Do not invent new employers, titles, date ranges, metrics, or team sizes. Anchor roles (NetEnt and earlier) stay closer to source facts.",
     "- The output experience timeline must include ONLY these roles — do not add, remove, merge, or combine employers:",
     ...timelineLines,
     "- Never merge separate employers or concurrent roles into one entry. Each employer in the list above must remain its own experience item.",
     "- List experience in reverse chronological order (most recent role first).",
     "- Experience descriptions must use this markdown-ish format: each bullet on its own line starting with \"- \", and **bold** for emphasis.",
+    ...EXPERIENCE_BULLET_WRITING_RULES.split("\n").map((line) => `- ${line}`),
     "- Dates: use date_label strings from source CVs. Do not invent employers or date ranges. Avoid overlapping full-time roles — contractor entries (subtitle contains \"Contractor\") may run alongside other work.",
-    "- coverage: for each of the top 8 must_have_requirements, report whether the tailored CV covers it as strong, partial, or missing, with brief evidence.",
+    "- If candidate location is provided, use it in summary and coverage only for location requirements (e.g. EU-based). Malta is in the EU. Never put location in experience bullets.",
+    "- coverage: score the tailored CV text. JD vocabulary in post-NetEnt bullets counts as partial or strong when it reflects adjacent real work.",
     "- target_role should match the job posting title, or the closest honest fit from the candidate's experience.",
     "- title is an admin label for this tailored version (the target role, or \"Company – Role\" if a company is provided).",
   ];
@@ -415,8 +429,9 @@ function trackExperienceRules(track: RoleTrack, cluster: ExperienceCluster): str
     case "product":
       return [
         clusterHint,
-        "- Experience emphasis: lead with product ownership, discovery, roadmap, stakeholder alignment, delivery outcomes, and AI/agentic product strategy where supported by source CVs.",
-        "- At least half of the bullets in the post-NetEnt roles MUST map to a core_responsibility or must_have_requirement.",
+        "- Experience emphasis: lead with product ownership, discovery, product vision, roadmap, use-case identification, stakeholder alignment, concept through to production, and AI/agentic product strategy.",
+        "- In post-NetEnt roles, at least 6 bullets MUST each contain a phrase from ats_keywords, must_have_requirements, or core_responsibilities.",
+        "- At least half of the bullets in other roles MUST map to a core_responsibility or must_have_requirement.",
       ].join("\n");
     case "engineering_management":
       return [
@@ -492,8 +507,41 @@ function mergeBulletBank(role: CanonicalRole, bullets: string[]): void {
   }
 }
 
-function isAnchorRole(role: CanonicalRole): boolean {
+export function isAnchorRole(role: CanonicalRole): boolean {
   return ANCHOR_EMPLOYERS.some((pattern) => pattern.test(employerText(role)));
+}
+
+export function selectPostNetEntRoles(timeline: CanonicalRole[]): CanonicalRole[] {
+  return timeline.filter((role) => !isAnchorRole(role));
+}
+
+export function buildKeywordTargetingBrief(
+  postNetEntRoles: CanonicalRole[],
+  jdAnalysis: JdAnalysis
+): string {
+  const roleLines = postNetEntRoles.map((role) => {
+    const parts = [role.title, role.subtitle, role.date_label].filter(Boolean);
+    return `- ${parts.join(" — ")}`;
+  });
+
+  return [
+    "Post-NetEnt keyword targeting — rewrite these roles with natural CV bullets that include JD vocabulary:",
+    ...(roleLines.length > 0 ? roleLines : ["- (none selected)"]),
+    "",
+    EXPERIENCE_BULLET_WRITING_RULES,
+    "",
+    "Weave the phrases below into normal achievement bullets. Do NOT quote requirements or explain fit — just write the work as if the candidate already speaks the JD's language.",
+    "Do NOT invent employers, titles, dates, metrics, or team sizes.",
+    "",
+    "Must-have requirements:",
+    ...jdAnalysis.must_have_requirements.map((requirement) => `- ${requirement}`),
+    "",
+    "ATS keywords:",
+    jdAnalysis.ats_keywords.join(", ") || "(none)",
+    "",
+    "Core responsibilities to mirror:",
+    ...jdAnalysis.core_responsibilities.map((responsibility) => `- ${responsibility}`),
+  ].join("\n");
 }
 
 function employerText(role: CanonicalRole): string {

@@ -9,6 +9,7 @@ import {
 } from "@/lib/generate-cv";
 import { analyseJobDescription, resolveCompanyName } from "@/lib/jd-analysis";
 import { resolveCvIdentity } from "@/lib/cv-identity";
+import { filterMasterSourceCvs } from "@/lib/master-cvs";
 import { ensureUniqueSlug } from "@/lib/cv-pdf";
 import { getSkillPool } from "@/lib/skill-pool-data";
 import { createSupabaseServerClient } from "@/lib/supabase";
@@ -54,13 +55,16 @@ export async function POST(request: NextRequest) {
     companyName: companyName || null,
   });
 
-  const sourceCvs = await getAllCvsWithEntries();
-  if (sourceCvs.length === 0) {
+  const allCvs = await getAllCvsWithEntries();
+  if (allCvs.length === 0) {
     return NextResponse.json(
       { error: "Create at least one CV before generating a tailored version." },
       { status: 400 }
     );
   }
+
+  const sourceCvs = filterMasterSourceCvs(allCvs);
+  const identity = resolveCvIdentity(allCvs);
 
   let jdAnalysis;
   try {
@@ -77,8 +81,9 @@ export async function POST(request: NextRequest) {
   const resolvedCompanyName = resolveCompanyName(companyName, jdAnalysis);
   const skillPool = await getSkillPool();
   console.log("[generate-cv] Loaded inputs", {
-    sourceCvCount: sourceCvs.length,
-    sourceCvTitles: sourceCvs.map((source) => source.cv.title),
+    totalCvCount: allCvs.length,
+    masterCvCount: sourceCvs.length,
+    masterCvTitles: sourceCvs.map((source) => source.cv.title),
     skillPoolCount: skillPool.length,
     resolvedCompanyName,
   });
@@ -91,6 +96,10 @@ export async function POST(request: NextRequest) {
       sourceCvs,
       jdAnalysis,
       skillPool,
+      candidateLocation: {
+        city: identity.city,
+        country: identity.country,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not generate CV.";
@@ -103,13 +112,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
   }
 
-  const identity = resolveCvIdentity(sourceCvs);
   const targetRole = generated.target_role.trim();
   const title = buildGeneratedTitle(targetRole, resolvedCompanyName);
   const slugBase = buildGeneratedSlugBase(targetRole, resolvedCompanyName, generated.slug);
   const uniqueSlug = ensureUniqueSlug(
     normalizeGeneratedSlug(slugBase),
-    sourceCvs.map((source) => source.cv.slug)
+    allCvs.map((source) => source.cv.slug)
   );
 
   const { data: newCv, error: cvError } = await client
