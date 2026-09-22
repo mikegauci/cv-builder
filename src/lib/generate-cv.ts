@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { getOpenAiModel, getOpenAiTemperature } from "@/lib/openai-model";
+import { buildCandidateFactsBrief } from "@/lib/candidate-facts";
 import {
   buildCanonicalTimeline,
   buildKeywordTargetingBrief,
@@ -429,6 +430,8 @@ function buildUserPrompt(
     `Detected experience cluster: ${experienceCluster}`,
     locationLine,
     "",
+    buildCandidateFactsBrief(),
+    "",
     keywordBrief,
     "",
     "Structured JD analysis (use this as the tailoring brief):",
@@ -704,6 +707,7 @@ async function fillJdGapsInCv(
           "- For product-owner tenure gaps: count Technical Product Owner, Web Project Manager, and Owner/Managing Director as business-facing product ownership across the career.",
           "- Use anchor-role context (Kenmore, Motor Element, etc.) as factual support when reframing Kindred/Momentum/TinyMCE bullets.",
           "- Skills: return 5-7 categories ordered by JD relevance. Prefer skill pool items; ADD JD tech_stack and gap-related terms (e.g. Agentic AI, LLMs, RAG) when needed to cover gaps.",
+          "- Always include Claude Code, Claude Design, Cursor AI and AI-assisted apps in a relevant skills category.",
           "- Skills description is a comma-separated list per category. Do NOT output coverage analysis.",
         ].join("\n"),
       },
@@ -712,6 +716,8 @@ async function fillJdGapsInCv(
         content: [
           "Target role:",
           jdAnalysis.role_title,
+          "",
+          buildCandidateFactsBrief(),
           "",
           "Coverage gaps to fill (each needs matching bullets + skills where applicable):",
           gaps.map((item) => `- [${item.status}] ${item.requirement}`).join("\n"),

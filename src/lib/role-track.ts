@@ -1,3 +1,4 @@
+import { CANDIDATE_AI_TOOLS } from "@/lib/candidate-facts";
 import type { CvWithEntries, JdAnalysis, RoleTrack } from "@/lib/types";
 
 export type ExperienceCluster = "product" | "fullstack" | "frontend_saas";
@@ -373,6 +374,7 @@ export function buildSystemPrompt(
     "- You MUST rewrite the summary and every experience bullet. Do not copy bullets verbatim from the source CVs.",
     "- The summary MUST be 3-5 sentences, open with the JD role title, and explicitly address the top three must_have_requirements using jd_summary as the brief.",
     "- Write the summary as a confident hiring-manager pitch. Never mention missing skills, gaps, or what the candidate has not done.",
+    `- Mention daily use of ${CANDIDATE_AI_TOOLS.join(", ")} in the summary and in at least one post-NetEnt experience bullet.`,
     "- Experience: 6-8 bullets per role (every role in the output). Reframe real work in the JD's vocabulary and ATS keywords.",
     "- Post-NetEnt roles (non-anchor employers in the timeline) are the primary JD keyword targets: every must_have_requirement and ats_keyword should appear in at least one post-NetEnt bullet.",
     "- On post-NetEnt roles only, weave JD vocabulary (product vision, roadmap, use cases, concept through to production, business outcomes, governance, validation, security, Agentic AI, LLMs, RAG, prompt engineering, guardrails, evaluation) into descriptions of real work at that employer.",
