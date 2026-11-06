@@ -63,3 +63,20 @@ On Vercel Hobby, function timeout is 60s — generation may fail if both OpenAI 
 - `/admin/cvs` CV list + create, PDF import, and generate from a job description
 - `/admin/cvs/[id]` CV editor (includes JD match coverage for generated CVs)
 - `/admin/skills` skills pool used by JD-tailored CV generation
+
+## Supabase keep-alive
+
+Vercel calls `/api/cron/heartbeat` daily at 08:00 UTC, as configured in
+`vercel.json`. Each call reads at most one CV ID from Supabase to generate
+database activity without modifying data. The route is dynamic so each run
+performs a fresh query.
+
+Set a strong random `CRON_SECRET` in the Vercel project's Production environment
+variables before deploying. Vercel automatically sends it as an
+`Authorization: Bearer <CRON_SECRET>` header. Requests with a missing or incorrect
+secret are rejected.
+
+The endpoint uses the existing `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` variables. Cron jobs become active on a production
+deployment. A missing database configuration or failed query returns HTTP 500
+and is logged in Vercel.
